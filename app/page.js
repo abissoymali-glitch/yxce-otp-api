@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 const KEY = 'f3b9d00e4f427e4b78f6b53c90e5908f';
 const call = async (path) => {
   const r = await fetch('/api/proxy?path=' + encodeURIComponent(path));
+  if (!r.ok) throw new Error('network');
   return r.json();
 };
 const api = {
@@ -28,6 +29,7 @@ export default function App() {
   const [view, setView] = useState('traffic');
   const [menuOpen, setMenuOpen] = useState(false);
   const [nums, setNumsState] = useState([]);
+  const [globalMsg, setGlobalMsg] = useState(null);
   const pollRef = useRef(null);
 
   useEffect(() => {
@@ -47,7 +49,6 @@ export default function App() {
     setNumsState(list);
   }, [user]);
 
-  // Otomatik kod sorgulama
   useEffect(() => {
     if (!user || nums.length === 0) return;
     const pending = nums.filter(n => !n.code);
@@ -57,15 +58,25 @@ export default function App() {
       try {
         const res = await api.sorgu(pending.map(n => n.number));
         let updated = false;
+        let foundCodes = [];
         const next = nums.map(n => {
           if (n.code) return n;
-          const found = Array.isArray(res) ? res.find(x => x.number === n.number && (x.code || x.sms)) : 
-                        res?.data?.find?.(x => x.number === n.number);
-          const code = found?.code || found?.sms || null;
-          if (code) { updated = true; return { ...n, code }; }
+          const arr = Array.isArray(res) ? res : (res?.data || res?.numbers || []);
+          const found = arr.find(x => String(x.number) === String(n.number) || String(x.numara) === String(n.number));
+          const code = found?.code || found?.sms || found?.message;
+          if (code) { 
+            updated = true; 
+            foundCodes.push({ num: n.number, code });
+            return { ...n, code }; 
+          }
           return n;
         });
-        if (updated) persistNums(next);
+        
+        if (updated) {
+          persistNums(next);
+          setGlobalMsg(`Yeni Kod Geldi! ${foundCodes.map(f => f.num + ': ' + f.code).join(', ')}`);
+          setTimeout(() => setGlobalMsg(null), 6000);
+        }
       } catch {}
     };
     tick();
@@ -100,10 +111,12 @@ export default function App() {
   if (!user) {
     return (
       <div className="auth-wrap">
+        <div className="glow glow-1"></div>
+        <div className="glow glow-2"></div>
         <div className="auth-card">
-          <div className="auth-logo"><h1>YXCE OTP</h1><p>Hızlı · Güvenilir · Şık</p></div>
+          <div className="auth-logo"><h1>YXCE OTP</h1><p>Premium Doğrulama Servisi</p></div>
           <div className="auth-welcome">
-            <span className="anim">YXCE OTP sitesine hoş geldiniz</span>
+            <span className="anim">YXCE OTP'ye Hoş Geldiniz</span>
           </div>
           <form onSubmit={auth}>
             <div className="field"><label>Kullanıcı Adı</label>
@@ -116,7 +129,7 @@ export default function App() {
             )}
             {err && <div className="auth-error">{err}</div>}
             <button className="btn btn-primary" type="submit">
-              {authMode === 'login' ? 'Hesabına Giriş Yap' : 'Kayıt Ol'}
+              {authMode === 'login' ? 'Giriş Yap' : 'Hesap Oluştur'}
             </button>
             <button type="button" className="btn btn-ghost"
               onClick={() => { setAuthMode(authMode === 'login' ? 'register' : 'login'); setErr(''); }}>
@@ -130,25 +143,28 @@ export default function App() {
 
   return (
     <div className="shell">
+      {globalMsg && <div className="global-toast">{globalMsg}</div>}
       {menuOpen && <div className="overlay" onClick={() => setMenuOpen(false)} />}
+      
       <aside className={'sidebar' + (menuOpen ? ' open' : '')}>
-        <div className="brand">YXCE OTP</div>
+        <div className="brand">YXCE<span>OTP</span></div>
         <div className="nav-group">
           {[
-            ['traffic', 'Live Trafik'],
-            ['buy', 'Numara Al'],
-            ['active', 'Aktif Numaralarım'],
-            ['query', 'Kod Sorgula'],
-            ['profile', 'Profilim'],
-            ...(user.isAdmin ? [['admin', 'Admin Paneli']] : []),
-          ].map(([k, label]) => (
+            ['traffic', 'Live Trafik', '📈'],
+            ['buy', 'Numara Al', '📱'],
+            ['active', 'Aktif Numaralarım', '⏳'],
+            ['query', 'Kod Sorgula', '🔍'],
+            ['profile', 'Profilim', '👤'],
+            ...(user.isAdmin ? [['admin', 'Admin Paneli', '👑']] : []),
+          ].map(([k, label, icon]) => (
             <button key={k} className={'nav-item' + (view === k ? ' active' : '')}
               onClick={() => { setView(k); setMenuOpen(false); }}>
-              {label}
+              <span className="nav-icon">{icon}</span> {label}
             </button>
           ))}
         </div>
       </aside>
+      
       <div className="main">
         <header className="topbar">
           <button className="hamburger" onClick={() => setMenuOpen(v => !v)}>
@@ -167,9 +183,10 @@ export default function App() {
             <span className="uname">{user.username}</span>
           </button>
         </header>
+        
         <main className="content">
           {view === 'traffic' && <LiveTraffic />}
-          {view === 'buy' && <Buy onBuy={(n) => persistNums([...nums, ...n])} />}
+          {view === 'buy' && <Buy onBuy={(n) => persistNums([...nums, ...n])} setGlobalMsg={setGlobalMsg} />}
           {view === 'active' && <Active nums={nums} />}
           {view === 'query' && <Query nums={nums} persist={persistNums} />}
           {view === 'profile' && <Profile user={user} setUser={setUser} logout={logout} />}
@@ -192,9 +209,9 @@ function LiveTraffic() {
   return (
     <div className="fade-in">
       <div className="ptitle">Live Trafik</div>
-      <div className="psub">Anlık sistem hareketliliği — 10 saniyede bir yenilenir</div>
+      <div className="psub">Sistemdeki anlık hareketlilik</div>
       {err && <div className="auth-error">{err}</div>}
-      <div className="card">
+      <div className="card glass">
         <pre style={{ whiteSpace: 'pre-wrap', fontSize: 13, color: 'var(--muted)', fontFamily: 'monospace' }}>
           {data ? JSON.stringify(data, null, 2) : 'Sisteme bağlanılıyor...'}
         </pre>
@@ -203,32 +220,40 @@ function LiveTraffic() {
   );
 }
 
-function Buy({ onBuy }) {
+function Buy({ onBuy, setGlobalMsg }) {
   const [stok, setStok] = useState(null);
   const [loading, setLoading] = useState(false);
   const [app, setApp] = useState(null);
-  const [msg, setMsg] = useState('');
+  const [localMsg, setLocalMsg] = useState(null);
 
   useEffect(() => { 
-    api.stok().then(d => setStok(d)).catch(() => setMsg('Stok bilgisi alınamadı')); 
+    api.stok().then(d => setStok(d)).catch(() => setLocalMsg('Stok bilgisi alınamadı')); 
   }, []);
 
   const buy = async (country) => {
-    setLoading(true); setMsg('');
+    setLoading(true); setLocalMsg(null);
     try {
       const res = await api.al(app, country, 5);
-      const list = (res.numbers || res.data || res || []).map(n => {
-        const number = typeof n === 'string' ? n : (n.number || n.numara);
+      // API'den dönen array'i bul (bazen direkt array, bazen obje içinde)
+      let rawList = Array.isArray(res) ? res : (res.numbers || res.data || res.numaralar || []);
+      if (typeof rawList === 'string') rawList = rawList.split(',');
+      
+      const list = rawList.map(n => {
+        const number = typeof n === 'string' ? n.trim() : (n.number || n.numara || n.phone);
         return { number, app, country, code: null, boughtAt: Date.now() };
-      });
+      }).filter(n => n.number);
+
       if (list.length > 0) {
         onBuy(list);
-        setMsg(`Başarılı! ${list.length} numara aktif numaralarına eklendi.`);
+        setGlobalMsg(`Başarılı! ${list.length} numara alındı.`);
+        setTimeout(() => setGlobalMsg(null), 4000);
         setApp(null);
       } else {
-        setMsg('Stokta numara bulunamadı veya API hata döndürdü.');
+        setLocalMsg('Stokta numara yok veya API boş döndü.');
       }
-    } catch { setMsg('Sunucuya bağlanılamadı.'); }
+    } catch (e) { 
+      setLocalMsg('Sunucuya bağlanılamadı veya API hatası.'); 
+    }
     setLoading(false);
   };
 
@@ -236,7 +261,8 @@ function Buy({ onBuy }) {
     <div className="fade-in">
       <div className="ptitle">Numara Al</div>
       <div className="psub">Uygulama ve ülke seç, anında 5 numara çek</div>
-      {msg && <div className="card" style={{ padding: 14, fontSize: 14, color: 'var(--accent2)', borderColor: 'var(--accent)' }}>{msg}</div>}
+      
+      {localMsg && <div className="card" style={{ padding: 16, fontSize: 14, color: '#fca5a5', borderColor: 'rgba(239,68,68,.3)' }}>{localMsg}</div>}
       
       {!app ? (
         <div className="grid">
@@ -250,16 +276,19 @@ function Buy({ onBuy }) {
         </div>
       ) : (
         <div>
-          <div className="card flex-between">
-            <div><b style={{ fontSize: 18 }}>{app}</b> <span style={{ color: 'var(--muted)' }}>— Ülke Seç</span></div>
+          <div className="card flex-between glass">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div className="app-icon">{app[0]}</div>
+              <div><b style={{ fontSize: 18 }}>{app}</b> <span style={{ color: 'var(--muted)' }}>— Ülke Seç</span></div>
+            </div>
             <button className="btn-inline" onClick={() => setApp(null)}>Geri Dön</button>
           </div>
           <div className="grid">
             {Object.entries(stok[app]).map(([country, count]) => (
               <div key={country} className="tile" onClick={() => !loading && buy(country)}>
                 <div className="tile-name">{country}</div>
-                <div className="tile-stock green">{count} adet stok</div>
-                {loading && <div className="tile-stock">Alınıyor...</div>}
+                <div className="tile-stock green">{count} adet</div>
+                {loading && <div className="tile-loading">Alınıyor...</div>}
               </div>
             ))}
           </div>
@@ -277,13 +306,17 @@ function Active({ nums }) {
       {nums.length === 0 ? <div className="empty">Henüz bir numara almadın.</div> : (
         <div className="list-wrap">
           {nums.map(n => (
-            <div key={n.number} className="num-row">
+            <div key={n.number} className="num-row glass">
               <div>
                 <div className="num-val">{n.number}</div>
                 <div className="num-app"><span className="badge badge-purple">{n.app}</span> {n.country}</div>
               </div>
-              {n.code ? <div className="num-code">{n.code}</div>
-                : <span className="badge badge-yellow pulse">Kod Bekleniyor</span>}
+              {n.code ? (
+                <div className="num-code-wrap">
+                  <div className="num-code">{n.code}</div>
+                  <button className="btn-copy" onClick={() => navigator.clipboard.writeText(n.code)}>Kopyala</button>
+                </div>
+              ) : <span className="badge badge-yellow pulse">Kod Bekleniyor</span>}
             </div>
           ))}
         </div>
@@ -304,9 +337,9 @@ function Query({ nums, persist }) {
     try {
       const r = await api.sorgu(list);
       setRes(r);
-      const arr = Array.isArray(r) ? r : (r.data || []);
+      const arr = Array.isArray(r) ? r : (r.data || r.numbers || []);
       const next = nums.map(n => {
-        const f = arr.find(x => x.number === n.number);
+        const f = arr.find(x => String(x.number) === String(n.number));
         return f?.code ? { ...n, code: f.code } : n;
       });
       persist(next);
@@ -318,7 +351,7 @@ function Query({ nums, persist }) {
     <div className="fade-in">
       <div className="ptitle">Kod Sorgula</div>
       <div className="psub">Numaraları virgülle ayırarak toplu sorgulama yap</div>
-      <div className="card">
+      <div className="card glass">
         <div className="input-row">
           <input placeholder="905551234567, 905551234568" value={input} onChange={e => setInput(e.target.value)} />
           <button className="btn-inline" disabled={loading} onClick={doQuery}>
@@ -326,7 +359,7 @@ function Query({ nums, persist }) {
           </button>
         </div>
         {res && (
-          <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12, color: 'var(--muted)', marginTop: 16, background: 'var(--bg)', padding: 16, borderRadius: 8 }}>
+          <pre className="json-view">
             {JSON.stringify(res, null, 2)}
           </pre>
         )}
@@ -363,13 +396,13 @@ function Profile({ user, setUser, logout }) {
       <div className="psub">Kişisel bilgilerini ve görünümünü düzenle</div>
       {msg && <div className="card" style={{ padding: 12, fontSize: 13, color: '#4ade80' }}>{msg}</div>}
       
-      <div className="card">
-        <div style={{ display: 'flex', gap: 24, alignItems: 'center', marginBottom: 24 }}>
-          <div className="avatar" style={{ width: 90, height: 90, fontSize: 36, border: '2px solid var(--accent)' }}>
+      <div className="card glass">
+        <div style={{ display: 'flex', gap: 24, alignItems: 'center', marginBottom: 28 }}>
+          <div className="avatar" style={{ width: 100, height: 100, fontSize: 40, border: '3px solid var(--accent)' }}>
             {u.avatar ? <img src={u.avatar} alt="" /> : u.username[0]?.toUpperCase()}
           </div>
           <div>
-            <label className="btn-inline" style={{ display: 'inline-block', padding: '10px 20px', cursor: 'pointer' }}>
+            <label className="btn-inline" style={{ display: 'inline-block', padding: '12px 24px', cursor: 'pointer' }}>
               Fotoğraf Yükle
               <input type="file" accept="image/*" hidden onChange={upload} />
             </label>
@@ -402,7 +435,7 @@ function Admin() {
     <div className="fade-in">
       <div className="ptitle">Admin Paneli</div>
       <div className="psub">Sistem istatistikleri ve kullanıcı sıralaması</div>
-      <div className="card">
+      <div className="card glass">
         {ranked.length === 0 && <div className="empty">Kayıtlı kullanıcı bulunmuyor.</div>}
         {ranked.map((r, i) => (
           <div key={r.name} className="rank-row">
@@ -416,4 +449,4 @@ function Admin() {
       </div>
     </div>
   );
-              }
+  }
